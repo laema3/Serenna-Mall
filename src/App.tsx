@@ -444,7 +444,11 @@ function MainApp() {
               // (though we usually use the UID as the doc ID, here we might have used a random ID)
               // Actually, the Auth listener will handle the rest.
             } catch (createErr: any) {
-              setLoginError('Erro ao criar conta de acesso: ' + createErr.message);
+              let msg = 'Erro ao criar conta de acesso: ' + createErr.message;
+              if (createErr.code === 'auth/email-already-in-use') {
+                msg = 'Este nome de usuário já está em uso no sistema de autenticação.';
+              }
+              setLoginError(msg);
             }
           } else {
             setLoginError('Erro na autenticação: ' + authErr.message);
@@ -508,7 +512,15 @@ function MainApp() {
       alert('Conta criada com sucesso! Você já está logado.');
     } catch (err: any) {
       console.error('Registration error:', err);
-      setLoginError('Erro ao criar conta: ' + err.message);
+      let message = 'Erro ao criar conta: ' + err.message;
+      if (err.code === 'auth/email-already-in-use') {
+        message = 'Este nome de usuário já está em uso. Tente outro ou faça login.';
+      } else if (err.code === 'auth/weak-password') {
+        message = 'A senha é muito fraca.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = 'Nome de usuário inválido.';
+      }
+      setLoginError(message);
     }
   };
 
