@@ -1,0 +1,191 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: settings
+    // Fields:
+    //   - key: string (required)
+    //   - value: string (required)
+    //
+    // Collection: expenses
+    // Fields:
+    //   - date: string (required, YYYY-MM-DD)
+    //   - dueDate: string (optional, YYYY-MM-DD)
+    //   - invoiceNumber: string (optional)
+    //   - supplier: string (required)
+    //   - amount: number (required, positive)
+    //   - installment: string (optional)
+    //   - status: string (required, 'pending' | 'paid')
+    //
+    // Collection: suppliers
+    // Fields:
+    //   - name: string (required)
+    //   - contact: string (optional)
+    //   - email: string (optional, email format)
+    //   - category: string (optional)
+    //
+    // Collection: clients
+    // Fields:
+    //   - name: string (required)
+    //   - contact: string (optional)
+    //   - email: string (optional, email format)
+    //   - project: string (optional)
+    //
+    // Collection: cost_centers
+    // Fields:
+    //   - name: string (required)
+    //   - budget: number (required, positive)
+    //
+    // Collection: saved_reports
+    // Fields:
+    //   - name: string (required)
+    //   - filterStart: string (optional)
+    //   - filterEnd: string (optional)
+    //   - filterSupplier: string (optional)
+    //   - filterStatus: string (optional)
+    //
+    // Collection: users
+    // Fields:
+    //   - username: string (required)
+    //   - password: string (required)
+    //   - role: string (required, 'admin' | 'standard')
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "camillasites@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDate(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidExpense(data) {
+      return hasRequiredFields(['date', 'supplier', 'amount', 'status']) &&
+             isValidDate(data.date) &&
+             data.supplier is string && data.supplier.size() > 0 && data.supplier.size() < 200 &&
+             data.amount is number && data.amount >= 0 &&
+             data.status in ['pending', 'paid'] &&
+             (!('dueDate' in data) || isValidDate(data.dueDate)) &&
+             (!('invoiceNumber' in data) || (data.invoiceNumber is string && data.invoiceNumber.size() < 100)) &&
+             (!('installment' in data) || (data.installment is string && data.installment.size() < 50));
+    }
+
+    function isValidSupplier(data) {
+      return hasRequiredFields(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             (!('email' in data) || data.email == "" || isValidEmail(data.email)) &&
+             (!('contact' in data) || (data.contact is string && data.contact.size() < 100)) &&
+             (!('category' in data) || (data.category is string && data.category.size() < 100));
+    }
+
+    function isValidClient(data) {
+      return hasRequiredFields(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             (!('email' in data) || data.email == "" || isValidEmail(data.email)) &&
+             (!('contact' in data) || (data.contact is string && data.contact.size() < 100)) &&
+             (!('project' in data) || (data.project is string && data.project.size() < 200));
+    }
+
+    function isValidCostCenter(data) {
+      return hasRequiredFields(['name', 'budget']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.budget is number && data.budget >= 0;
+    }
+
+    function isValidUser(data) {
+      return hasRequiredFields(['username', 'password', 'role']) &&
+             data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
+             data.password is string && data.password.size() >= 4 &&
+             data.role in ['admin', 'standard'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidExpense(request.resource.data);
+      allow update: if isAuthenticated() && isValidExpense(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidSupplier(request.resource.data);
+      allow update: if isAuthenticated() && isValidSupplier(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidClient(request.resource.data);
+      allow update: if isAuthenticated() && isValidClient(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /cost_centers/{ccId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCostCenter(request.resource.data);
+      allow update: if isAuthenticated() && isValidCostCenter(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /saved_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      // Allow read for login check
+      allow read: if true;
+      // Allow user to create their own document if it doesn't exist, or if admin
+      allow create: if (isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data)) || isAdmin();
+      allow update: if isAdmin() && isValidUser(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

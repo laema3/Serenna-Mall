@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "Setting": {
+      "title": "Setting",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["key", "value"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Financial expense record",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "dueDate": { "type": "string", "format": "date" },
+        "invoiceNumber": { "type": "string" },
+        "supplier": { "type": "string" },
+        "amount": { "type": "number" },
+        "installment": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "paid"] }
+      },
+      "required": ["date", "supplier", "amount", "status"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "contact": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "category": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Client information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "contact": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "project": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "CostCenter": {
+      "title": "Cost Center",
+      "description": "Cost center budget information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "budget": { "type": "number" }
+      },
+      "required": ["name", "budget"]
+    },
+    "SavedReport": {
+      "title": "Saved Report",
+      "description": "Saved report filter templates",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "filterStart": { "type": "string" },
+        "filterEnd": { "type": "string" },
+        "filterSupplier": { "type": "string" },
+        "filterStatus": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Application user",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "standard"] }
+      },
+      "required": ["username", "password", "role"]
+    }
+  },
+  "firestore": {
+    "settings": {
+      "schema": "Setting",
+      "description": "Global settings collection"
+    },
+    "expenses": {
+      "schema": "Expense",
+      "description": "Expenses collection"
+    },
+    "suppliers": {
+      "schema": "Supplier",
+      "description": "Suppliers collection"
+    },
+    "clients": {
+      "schema": "Client",
+      "description": "Clients collection"
+    },
+    "cost_centers": {
+      "schema": "CostCenter",
+      "description": "Cost centers collection"
+    },
+    "saved_reports": {
+      "schema": "SavedReport",
+      "description": "Saved reports collection"
+    },
+    "users": {
+      "schema": "User",
+      "description": "Users collection"
+    }
+  }
+}
