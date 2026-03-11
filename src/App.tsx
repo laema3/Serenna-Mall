@@ -396,10 +396,13 @@ function MainApp() {
       setSavedReports(reports);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'saved_reports'));
 
-    const unsubAllUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
-      setAllUsers(users);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+    let unsubAllUsers: () => void;
+    if (user.role === 'admin') {
+      unsubAllUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
+        setAllUsers(users);
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+    }
 
     return () => {
       unsubSettings();
@@ -408,7 +411,7 @@ function MainApp() {
       unsubClients();
       unsubCostCenters();
       unsubReports();
-      unsubAllUsers();
+      if (unsubAllUsers) unsubAllUsers();
     };
   }, [isAuthReady, user]);
 
