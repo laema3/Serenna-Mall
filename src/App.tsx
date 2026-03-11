@@ -315,7 +315,25 @@ function MainApp() {
       if (firebaseUser) {
         // Check if user exists in Firestore users collection
         try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          let userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          
+          // Se o documento não existe no UID do Auth, mas o email é do nosso sistema de login manual
+          if (!userDoc.exists() && firebaseUser.email?.endsWith('@serenna.mall')) {
+            const docId = firebaseUser.email.split('@')[0];
+            const oldDoc = await getDoc(doc(db, 'users', docId));
+            
+            if (oldDoc.exists()) {
+              const userData = oldDoc.data();
+              // Migra o documento antigo para o novo UID do Auth
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                ...userData,
+                id: firebaseUser.uid
+              });
+              await deleteDoc(doc(db, 'users', docId));
+              userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+            }
+          }
+
           if (userDoc.exists()) {
             const userData = userDoc.data();
             setUser({
@@ -427,38 +445,30 @@ function MainApp() {
         return;
       }
 
-      const userDoc = querySnapshot.docs[0];
-      const userData = userDoc.data();
+      // Procura o documento que tem a senha correta (ignora documentos duplicados sem senha)
+      const userDoc = querySnapshot.docs.find(doc => doc.data().password === loginForm.password);
       
-      if (userData.password === loginForm.password) {
-        const dummyEmail = `${loginForm.username}@serenna.mall`;
-        try {
-          // Try to sign in
-          await signInWithEmailAndPassword(auth, dummyEmail, loginForm.password);
-        } catch (authErr: any) {
-          if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
-            // If user doesn't exist in Auth but exists in Firestore with correct password,
-            // we "lazy-create" them in Firebase Auth.
-            try {
-              const { createUserWithEmailAndPassword } = await import('firebase/auth');
-              await createUserWithEmailAndPassword(auth, dummyEmail, loginForm.password);
-              
-              // Update the Firestore document with the new UID if it's different
-              // (though we usually use the UID as the doc ID, here we might have used a random ID)
-              // Actually, the Auth listener will handle the rest.
-            } catch (createErr: any) {
-              let msg = 'Erro ao criar conta de acesso: ' + createErr.message;
-              if (createErr.code === 'auth/email-already-in-use') {
-                msg = 'Este nome de usuário já está em uso no sistema de autenticação.';
-              }
-              setLoginError(msg);
-            }
-          } else {
-            setLoginError('Erro na autenticação: ' + authErr.message);
-          }
-        }
-      } else {
+      if (!userDoc) {
         setLoginError('Senha incorreta');
+        return;
+      }
+
+      const userData = userDoc.data();
+      const dummyEmail = `${userDoc.id}@serenna.mall`;
+      
+      try {
+        await signInWithEmailAndPassword(auth, dummyEmail, loginForm.password);
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+          try {
+            const { createUserWithEmailAndPassword } = await import('firebase/auth');
+            await createUserWithEmailAndPassword(auth, dummyEmail, loginForm.password);
+          } catch (createErr: any) {
+            setLoginError('Erro ao criar conta de acesso: ' + createErr.message);
+          }
+        } else {
+          setLoginError('Erro na autenticação: ' + authErr.message);
+        }
       }
     } catch (err) {
       console.error('Login error:', err);
