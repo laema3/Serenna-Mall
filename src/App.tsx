@@ -809,15 +809,20 @@ function MainApp() {
         expDueDate = dDate.toISOString().split('T')[0];
       }
 
-      newExpenses.push({
+      const expenseData: any = {
         date: expDate.toISOString().split('T')[0],
-        dueDate: expDueDate,
-        invoiceNumber: count > 1 ? `${newExpense.invoiceNumber} (${i + 1}/${count})` : newExpense.invoiceNumber,
-        supplier: newExpense.supplier,
-        amount: newExpense.amount,
-        installment: count > 1 ? `${i + 1}/${count}` : undefined,
+        dueDate: expDueDate || '',
+        invoiceNumber: count > 1 ? `${newExpense.invoiceNumber} (${i + 1}/${count})` : (newExpense.invoiceNumber || ''),
+        supplier: newExpense.supplier || '',
+        amount: newExpense.amount || 0,
         status: 'pending'
-      });
+      };
+
+      if (count > 1) {
+        expenseData.installment = `${i + 1}/${count}`;
+      }
+
+      newExpenses.push(expenseData);
     }
 
     try {
@@ -862,8 +867,11 @@ function MainApp() {
   const saveEdit = async () => {
     if (!editingId) return;
     const { id, ...dataToUpdate } = editForm as any;
+    const cleanData = Object.fromEntries(
+      Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
+    );
     try {
-      await updateDoc(doc(db, 'expenses', editingId), dataToUpdate);
+      await updateDoc(doc(db, 'expenses', editingId), cleanData);
       setEditingId(null);
       setEditForm({});
       alert('Alterações salvas com sucesso!');
@@ -933,8 +941,11 @@ function MainApp() {
   const saveEditCostCenter = async () => {
     if (!editingCostCenterId) return;
     const { id, ...dataToUpdate } = editCostCenterForm as any;
+    const cleanData = Object.fromEntries(
+      Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
+    );
     try {
-      await updateDoc(doc(db, 'cost_centers', editingCostCenterId), dataToUpdate);
+      await updateDoc(doc(db, 'cost_centers', editingCostCenterId), cleanData);
       setEditingCostCenterId(null);
       setEditCostCenterForm({});
       alert('Centro de custo atualizado com sucesso!');
@@ -993,8 +1004,11 @@ function MainApp() {
   const saveEditSupplier = async () => {
     if (!editingSupplierId) return;
     const { id, ...dataToUpdate } = editSupplierForm as any;
+    const cleanData = Object.fromEntries(
+      Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
+    );
     try {
-      await updateDoc(doc(db, 'suppliers', editingSupplierId), dataToUpdate);
+      await updateDoc(doc(db, 'suppliers', editingSupplierId), cleanData);
       setEditingSupplierId(null);
       setEditSupplierForm({});
       alert('Fornecedor atualizado com sucesso!');
@@ -1049,8 +1063,11 @@ function MainApp() {
   const saveEditClient = async () => {
     if (!editingClientId) return;
     const { id, ...dataToUpdate } = editClientForm as any;
+    const cleanData = Object.fromEntries(
+      Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
+    );
     try {
-      await updateDoc(doc(db, 'clients', editingClientId), dataToUpdate);
+      await updateDoc(doc(db, 'clients', editingClientId), cleanData);
       setEditingClientId(null);
       setEditClientForm({});
       alert('Cliente atualizado com sucesso!');
