@@ -665,10 +665,8 @@ function MainApp() {
   const [editCostCenterForm, setEditCostCenterForm] = useState<Partial<CostCenter>>({});
 
   // Delete Modal State
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: '', type: 'expense' as 'expense' | 'supplier' | 'client' | 'costCenter' | 'savedReport' | 'user', password: '', error: '' });
-  const [passwordModal, setPasswordModal] = useState({ isOpen: false, action: null as (() => void) | null, password: '', error: '' });
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: '', type: 'expense' as 'expense' | 'supplier' | 'client' | 'costCenter' | 'savedReport' | 'user', error: '' });
   const [quickSupplierModal, setQuickSupplierModal] = useState({ isOpen: false, name: '', contact: '', email: '', category: '' });
-  const DELETE_PASSWORD = 'admin'; // Senha padrão para exclusão
 
   const quickAddSupplier = async () => {
     try {
@@ -687,11 +685,7 @@ function MainApp() {
 
   const handleQuickAddSupplier = (e: React.FormEvent) => {
     e.preventDefault();
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      quickAddSupplier();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => quickAddSupplier(), password: '', error: '' });
-    }
+    quickAddSupplier();
   };
 
   const filteredExpenses = useMemo(() => {
@@ -701,7 +695,11 @@ function MainApp() {
       if (filterSupplier && !exp.supplier.toLowerCase().includes(filterSupplier.toLowerCase())) return false;
       if (filterStatus !== 'all' && exp.status !== filterStatus) return false;
       return true;
-    }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }).sort((a, b) => {
+      const dateA = new Date(a.dueDate || a.date).getTime();
+      const dateB = new Date(b.dueDate || b.date).getTime();
+      return dateA - dateB;
+    });
   }, [expenses, filterStart, filterEnd, filterSupplier, filterStatus]);
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
@@ -748,12 +746,6 @@ function MainApp() {
   }, [filteredExpenses, expenses, initialBalance, filterStart]);
 
   const handleSaveBalance = async () => {
-    const inputPass = balancePassword.trim();
-    if (inputPass !== DELETE_PASSWORD && inputPass !== 'admin123') {
-      alert('Senha incorreta!');
-      return;
-    }
-    
     // Handle Brazilian format (replace comma with dot and remove thousands separator)
     const sanitizedBalance = tempBalance.replace(/\./g, '').replace(',', '.');
     const newBalance = parseFloat(sanitizedBalance);
@@ -784,19 +776,11 @@ function MainApp() {
   };
 
   const handleToggleStatus = (expense: Expense) => {
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      toggleStatus(expense);
-    } else {
-      setPasswordModal({ isOpen: true, action: () => toggleStatus(expense), password: '', error: '' });
-    }
+    toggleStatus(expense);
   };
 
   const handleStartEdit = (expense: Expense) => {
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      startEdit(expense);
-    } else {
-      setPasswordModal({ isOpen: true, action: () => startEdit(expense), password: '', error: '' });
-    }
+    startEdit(expense);
   };
 
   const handleConfirmDelete = (id: string) => {
@@ -854,12 +838,7 @@ function MainApp() {
   const handleAddExpense = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newExpense.amount || !newExpense.supplier || !newExpense.date) return;
-    
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      addExpense();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => addExpense(), password: '', error: '' });
-    }
+    addExpense();
   };
 
   const startEdit = (expense: Expense) => {
@@ -875,6 +854,7 @@ function MainApp() {
 
   const saveEdit = async () => {
     if (!editingId) return;
+    console.log('Saving edit:', editForm);
     try {
       await updateDoc(doc(db, 'expenses', editingId), editForm);
       setEditingId(null);
@@ -885,16 +865,10 @@ function MainApp() {
   };
 
   const confirmDelete = (id: string, type: 'expense' | 'supplier' | 'client' | 'costCenter' | 'savedReport' | 'user' = 'expense') => {
-    setDeleteModal({ ...deleteModal, isOpen: true, id, type, password: '', error: '' });
+    setDeleteModal({ ...deleteModal, isOpen: true, id, type, error: '' });
   };
 
   const executeDelete = async () => {
-    const inputPass = deleteModal.password.trim();
-    if (inputPass !== DELETE_PASSWORD && inputPass !== 'admin123') {
-      setDeleteModal({ ...deleteModal, error: 'Senha incorreta' });
-      return;
-    }
-
     if (deleteModal.type === 'supplier') {
       const supplier = suppliers.find(s => s.id === deleteModal.id);
       const hasExpenses = expenses.some(exp => exp.supplier === supplier?.name);
@@ -913,7 +887,7 @@ function MainApp() {
                    'saved_reports';
       
       await deleteDoc(doc(db, path, deleteModal.id));
-      setDeleteModal({ isOpen: false, id: '', type: 'expense', password: '', error: '' });
+      setDeleteModal({ isOpen: false, id: '', type: 'expense', error: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${deleteModal.type}/${deleteModal.id}`);
     }
@@ -931,11 +905,7 @@ function MainApp() {
   const handleAddCostCenter = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCostCenter.name) return;
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      addCostCenter();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => addCostCenter(), password: '', error: '' });
-    }
+    addCostCenter();
   };
 
   const startEditCostCenter = (cc: CostCenter) => {
@@ -945,11 +915,7 @@ function MainApp() {
   };
 
   const handleStartEditCostCenter = (cc: CostCenter) => {
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      startEditCostCenter(cc);
-    } else {
-      setPasswordModal({ isOpen: true, action: () => startEditCostCenter(cc), password: '', error: '' });
-    }
+    startEditCostCenter(cc);
   };
 
   const saveEditCostCenter = async () => {
@@ -981,11 +947,7 @@ function MainApp() {
 
   const handleSaveReportTemplate = () => {
     if (!newSavedReportName) return;
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      saveReportTemplate();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => saveReportTemplate(), password: '', error: '' });
-    }
+    saveReportTemplate();
   };
 
   const addSupplier = async () => {
@@ -1000,11 +962,7 @@ function MainApp() {
   const handleAddSupplier = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSupplier.name) return;
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      addSupplier();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => addSupplier(), password: '', error: '' });
-    }
+    addSupplier();
   };
 
   const startEditSupplier = (s: Supplier) => {
@@ -1014,11 +972,7 @@ function MainApp() {
   };
 
   const handleStartEditSupplier = (s: Supplier) => {
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      startEditSupplier(s);
-    } else {
-      setPasswordModal({ isOpen: true, action: () => startEditSupplier(s), password: '', error: '' });
-    }
+    startEditSupplier(s);
   };
 
   const saveEditSupplier = async () => {
@@ -1044,11 +998,7 @@ function MainApp() {
   const handleAddClient = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClient.name) return;
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      addClient();
-    } else {
-      setPasswordModal({ isOpen: true, action: () => addClient(), password: '', error: '' });
-    }
+    addClient();
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -1075,11 +1025,7 @@ function MainApp() {
   };
 
   const handleStartEditClient = (c: Client) => {
-    if (user?.role === 'admin' || user?.username === 'admin') {
-      startEditClient(c);
-    } else {
-      setPasswordModal({ isOpen: true, action: () => startEditClient(c), password: '', error: '' });
-    }
+    startEditClient(c);
   };
 
   const saveEditClient = async () => {
@@ -1372,24 +1318,12 @@ function MainApp() {
               Confirmar Exclusão
             </h3>
             <p className="text-neutral-600 mb-4 text-sm">
-              Digite a senha de administrador para confirmar a exclusão. Esta ação não pode ser desfeita.
+              Tem certeza que deseja excluir este item? Esta ação não pode ser desfeita.
             </p>
-            
-            <input 
-              type="password" 
-              value={deleteModal.password}
-              onChange={e => setDeleteModal({...deleteModal, password: e.target.value, error: ''})}
-              className="w-full px-3 py-2 border border-neutral-300 rounded-lg mb-2 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all"
-              placeholder="Senha"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && executeDelete()}
-            />
-            
-            {deleteModal.error && <p className="text-red-600 text-sm mb-4 font-medium">{deleteModal.error}</p>}
             
             <div className="flex justify-end gap-3 mt-6">
               <button 
-                onClick={() => setDeleteModal({ isOpen: false, id: '', type: 'expense', password: '', error: '' })}
+                onClick={() => setDeleteModal({ isOpen: false, id: '', type: 'expense', error: '' })}
                 className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg font-medium transition-colors"
               >
                 Cancelar
@@ -1406,40 +1340,6 @@ function MainApp() {
       )}
 
       {/* Password Modal */}
-      {passwordModal.isOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full">
-            <h3 className="text-xl font-bold text-neutral-900 mb-4">Senha de Administrador</h3>
-            <input 
-              type="password" 
-              value={passwordModal.password}
-              onChange={e => setPasswordModal({...passwordModal, password: e.target.value, error: ''})}
-              className="w-full px-3 py-2 border border-neutral-300 rounded-lg mb-2 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="Senha"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && (passwordModal.password.trim() === DELETE_PASSWORD || passwordModal.password.trim() === 'admin123' ? (passwordModal.action?.(), setPasswordModal({...passwordModal, isOpen: false, password: ''})) : setPasswordModal({...passwordModal, error: 'Senha incorreta'}))}
-            />
-            {passwordModal.error && <p className="text-red-600 text-sm mb-4">{passwordModal.error}</p>}
-            <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => setPasswordModal({...passwordModal, isOpen: false, password: '', error: ''})} className="px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg">Cancelar</button>
-              <button 
-                onClick={() => {
-                  const inputPass = passwordModal.password.trim();
-                  if (inputPass === DELETE_PASSWORD || inputPass === 'admin123') {
-                    passwordModal.action?.();
-                    setPasswordModal({...passwordModal, isOpen: false, password: '', error: ''});
-                  } else {
-                    setPasswordModal({...passwordModal, error: 'Senha incorreta'});
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {quickSupplierModal.isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl shadow-xl max-w-md w-full animate-in fade-in zoom-in duration-200">
@@ -2333,7 +2233,7 @@ function MainApp() {
                           </td>
                         </tr>
                       ) : (
-                        filteredExpenses.slice().reverse().map((expense) => (
+                        filteredExpenses.map((expense) => (
                           <tr key={expense.id} className={`hover:bg-neutral-50 transition-colors group ${editingId === expense.id ? 'bg-blue-50/50' : ''}`}>
                             <td className="p-4 text-neutral-900 font-medium whitespace-nowrap">
                               {formatDate(expense.date)}
