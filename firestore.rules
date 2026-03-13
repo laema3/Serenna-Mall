@@ -83,7 +83,7 @@ service cloud.firestore {
     }
 
     function isValidDate(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$");
+      return dateStr is string && (dateStr == "" || dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$"));
     }
 
     // ===============================================================

@@ -97,11 +97,15 @@ interface FirestoreErrorInfo {
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   let errorMessage = error instanceof Error ? error.message : String(error);
   
+  console.error(`Firestore Error [${operationType}] at ${path}:`, error);
+
   // Traduzir erros comuns do Firestore
   if (errorMessage.includes('Missing or insufficient permissions')) {
-    errorMessage = 'Permissão insuficiente para realizar esta operação.';
+    errorMessage = 'Permissão insuficiente para realizar esta operação. Verifique se você tem autorização.';
   } else if (errorMessage.includes('Quota exceeded')) {
     errorMessage = 'Cota do banco de dados excedida. Por favor, tente novamente amanhã.';
+  } else if (errorMessage.includes('No document to update')) {
+    errorMessage = 'Erro: O documento que você está tentando editar não foi encontrado no servidor. Por favor, recarregue a página.';
   }
 
   const errInfo: FirestoreErrorInfo = {
@@ -123,6 +127,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  alert(`Erro: ${errorMessage}`);
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -393,35 +398,35 @@ function MainApp() {
     }, (err) => handleFirestoreError(err, OperationType.GET, 'settings/initialBalance'));
 
     const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
-      const exps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
+      const exps = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Expense));
       setExpenses(exps);
       setIsLoading(false);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'expenses'));
 
     const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), (snapshot) => {
-      const supps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier));
+      const supps = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Supplier));
       setSuppliers(supps);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'suppliers'));
 
     const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      const cls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+      const cls = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client));
       setClients(cls);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'clients'));
 
     const unsubCostCenters = onSnapshot(collection(db, 'cost_centers'), (snapshot) => {
-      const ccs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CostCenter));
+      const ccs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CostCenter));
       setCostCenters(ccs);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'cost_centers'));
 
     const unsubReports = onSnapshot(collection(db, 'saved_reports'), (snapshot) => {
-      const reports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SavedReport));
+      const reports = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SavedReport));
       setSavedReports(reports);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'saved_reports'));
 
     let unsubAllUsers: () => void;
     if (user.role === 'admin') {
       unsubAllUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppUser));
+        const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AppUser));
         setAllUsers(users);
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
     }
@@ -670,8 +675,9 @@ function MainApp() {
 
   const quickAddSupplier = async () => {
     try {
-      const docRef = await addDoc(collection(db, 'suppliers'), quickSupplierModal);
-      const newSupp = { ...quickSupplierModal, id: docRef.id } as Supplier;
+      const { isOpen, ...supplierData } = quickSupplierModal;
+      const docRef = await addDoc(collection(db, 'suppliers'), supplierData);
+      const newSupp = { ...supplierData, id: docRef.id } as Supplier;
       if (editingId) {
         setEditForm({ ...editForm, supplier: newSupp.name });
       } else {
@@ -770,6 +776,7 @@ function MainApp() {
     const newStatus = expense.status === 'paid' ? 'pending' : 'paid';
     try {
       await updateDoc(doc(db, 'expenses', expense.id), { status: newStatus });
+      alert('Status atualizado com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `expenses/${expense.id}`);
     }
@@ -803,7 +810,6 @@ function MainApp() {
       }
 
       newExpenses.push({
-        id: Math.random().toString(36).substr(2, 9),
         date: expDate.toISOString().split('T')[0],
         dueDate: expDueDate,
         invoiceNumber: count > 1 ? `${newExpense.invoiceNumber} (${i + 1}/${count})` : newExpense.invoiceNumber,
@@ -844,6 +850,7 @@ function MainApp() {
   const startEdit = (expense: Expense) => {
     setEditingId(expense.id);
     setEditForm(expense);
+    setCurrentView('expenses');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -854,11 +861,12 @@ function MainApp() {
 
   const saveEdit = async () => {
     if (!editingId) return;
-    console.log('Saving edit:', editForm);
+    const { id, ...dataToUpdate } = editForm as any;
     try {
-      await updateDoc(doc(db, 'expenses', editingId), editForm);
+      await updateDoc(doc(db, 'expenses', editingId), dataToUpdate);
       setEditingId(null);
       setEditForm({});
+      alert('Alterações salvas com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `expenses/${editingId}`);
     }
@@ -869,6 +877,8 @@ function MainApp() {
   };
 
   const executeDelete = async () => {
+    if (!deleteModal.id) return;
+
     if (deleteModal.type === 'supplier') {
       const supplier = suppliers.find(s => s.id === deleteModal.id);
       const hasExpenses = expenses.some(exp => exp.supplier === supplier?.name);
@@ -888,6 +898,7 @@ function MainApp() {
       
       await deleteDoc(doc(db, path, deleteModal.id));
       setDeleteModal({ isOpen: false, id: '', type: 'expense', error: '' });
+      alert('Item excluído com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${deleteModal.type}/${deleteModal.id}`);
     }
@@ -911,6 +922,7 @@ function MainApp() {
   const startEditCostCenter = (cc: CostCenter) => {
     setEditingCostCenterId(cc.id);
     setEditCostCenterForm(cc);
+    setCurrentView('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -920,10 +932,12 @@ function MainApp() {
 
   const saveEditCostCenter = async () => {
     if (!editingCostCenterId) return;
+    const { id, ...dataToUpdate } = editCostCenterForm as any;
     try {
-      await updateDoc(doc(db, 'cost_centers', editingCostCenterId), editCostCenterForm);
+      await updateDoc(doc(db, 'cost_centers', editingCostCenterId), dataToUpdate);
       setEditingCostCenterId(null);
       setEditCostCenterForm({});
+      alert('Centro de custo atualizado com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `cost_centers/${editingCostCenterId}`);
     }
@@ -968,6 +982,7 @@ function MainApp() {
   const startEditSupplier = (s: Supplier) => {
     setEditingSupplierId(s.id);
     setEditSupplierForm(s);
+    setCurrentView('suppliers');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -977,10 +992,12 @@ function MainApp() {
 
   const saveEditSupplier = async () => {
     if (!editingSupplierId) return;
+    const { id, ...dataToUpdate } = editSupplierForm as any;
     try {
-      await updateDoc(doc(db, 'suppliers', editingSupplierId), editSupplierForm);
+      await updateDoc(doc(db, 'suppliers', editingSupplierId), dataToUpdate);
       setEditingSupplierId(null);
       setEditSupplierForm({});
+      alert('Fornecedor atualizado com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `suppliers/${editingSupplierId}`);
     }
@@ -1021,6 +1038,7 @@ function MainApp() {
   const startEditClient = (c: Client) => {
     setEditingClientId(c.id);
     setEditClientForm(c);
+    setCurrentView('clients');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -1030,10 +1048,12 @@ function MainApp() {
 
   const saveEditClient = async () => {
     if (!editingClientId) return;
+    const { id, ...dataToUpdate } = editClientForm as any;
     try {
-      await updateDoc(doc(db, 'clients', editingClientId), editClientForm);
+      await updateDoc(doc(db, 'clients', editingClientId), dataToUpdate);
       setEditingClientId(null);
       setEditClientForm({});
+      alert('Cliente atualizado com sucesso!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `clients/${editingClientId}`);
     }
@@ -1320,6 +1340,12 @@ function MainApp() {
             <p className="text-neutral-600 mb-4 text-sm">
               Tem certeza que deseja excluir este item? Esta ação não pode ser desfeita.
             </p>
+            
+            {deleteModal.error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm mb-4">
+                {deleteModal.error}
+              </div>
+            )}
             
             <div className="flex justify-end gap-3 mt-6">
               <button 
