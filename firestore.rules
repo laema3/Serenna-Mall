@@ -124,9 +124,9 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return hasRequiredFields(['username', 'password', 'role']) &&
+      return hasRequiredFields(['username', 'role']) &&
              data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
-             data.password is string && data.password.size() >= 4 &&
+             (!('password' in data) || (data.password is string && data.password.size() >= 4)) &&
              data.role in ['admin', 'standard'];
     }
 
@@ -136,42 +136,42 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidExpense(request.resource.data);
       allow update: if isAuthenticated() && isValidExpense(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated();
     }
 
     match /suppliers/{supplierId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidSupplier(request.resource.data);
       allow update: if isAuthenticated() && isValidSupplier(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated();
     }
 
     match /clients/{clientId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidClient(request.resource.data);
       allow update: if isAuthenticated() && isValidClient(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated();
     }
 
     match /cost_centers/{ccId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidCostCenter(request.resource.data);
       allow update: if isAuthenticated() && isValidCostCenter(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated();
     }
 
     match /saved_reports/{reportId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated();
     }
 
     match /users/{userId} {

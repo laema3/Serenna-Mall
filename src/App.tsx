@@ -329,7 +329,11 @@ function MainApp() {
                 ...userData,
                 id: firebaseUser.uid
               });
-              await deleteDoc(doc(db, 'users', docId));
+              try {
+                await deleteDoc(doc(db, 'users', docId));
+              } catch (e) {
+                console.warn('Could not delete old user doc, probably due to permissions. This is fine.', e);
+              }
               userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
             }
           }
@@ -383,8 +387,8 @@ function MainApp() {
         const data = snapshot.data();
         const val = data?.value;
         setInitialBalance(typeof val === 'number' ? val : parseFloat(val) || 0);
-      } else {
-        setDoc(snapshot.ref, { key: 'initialBalance', value: '10000000' });
+      } else if (user?.role === 'admin') {
+        setDoc(snapshot.ref, { key: 'initialBalance', value: '10000000' }).catch(e => console.warn('Could not set initial balance', e));
       }
     }, (err) => handleFirestoreError(err, OperationType.GET, 'settings/initialBalance'));
 
@@ -666,8 +670,7 @@ function MainApp() {
   const [quickSupplierModal, setQuickSupplierModal] = useState({ isOpen: false, name: '', contact: '', email: '', category: '' });
   const DELETE_PASSWORD = 'admin'; // Senha padrão para exclusão
 
-  const handleQuickAddSupplier = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const quickAddSupplier = async () => {
     try {
       const docRef = await addDoc(collection(db, 'suppliers'), quickSupplierModal);
       const newSupp = { ...quickSupplierModal, id: docRef.id } as Supplier;
@@ -679,6 +682,15 @@ function MainApp() {
       setQuickSupplierModal({ isOpen: false, name: '', contact: '', email: '', category: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'suppliers');
+    }
+  };
+
+  const handleQuickAddSupplier = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      quickAddSupplier();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => quickAddSupplier(), password: '', error: '' });
     }
   };
 
@@ -762,12 +774,20 @@ function MainApp() {
     }
   };
 
-  const handleToggleStatus = async (expense: Expense) => {
+  const toggleStatus = async (expense: Expense) => {
     const newStatus = expense.status === 'paid' ? 'pending' : 'paid';
     try {
       await updateDoc(doc(db, 'expenses', expense.id), { status: newStatus });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `expenses/${expense.id}`);
+    }
+  };
+
+  const handleToggleStatus = (expense: Expense) => {
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      toggleStatus(expense);
+    } else {
+      setPasswordModal({ isOpen: true, action: () => toggleStatus(expense), password: '', error: '' });
     }
   };
 
@@ -783,9 +803,7 @@ function MainApp() {
     confirmDelete(id, 'expense');
   };
 
-  const handleAddExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const addExpense = async () => {
     const newExpenses = [];
     const count = newExpense.installments || 1;
     
@@ -830,6 +848,17 @@ function MainApp() {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'expenses');
+    }
+  };
+
+  const handleAddExpense = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newExpense.amount || !newExpense.supplier || !newExpense.date) return;
+    
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      addExpense();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => addExpense(), password: '', error: '' });
     }
   };
 
@@ -890,13 +919,36 @@ function MainApp() {
     }
   };
 
-  const handleAddCostCenter = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addCostCenter = async () => {
     try {
       await addDoc(collection(db, 'cost_centers'), newCostCenter);
       setNewCostCenter({ name: '', budget: 0 });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'cost_centers');
+    }
+  };
+
+  const handleAddCostCenter = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCostCenter.name) return;
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      addCostCenter();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => addCostCenter(), password: '', error: '' });
+    }
+  };
+
+  const startEditCostCenter = (cc: CostCenter) => {
+    setEditingCostCenterId(cc.id);
+    setEditCostCenterForm(cc);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleStartEditCostCenter = (cc: CostCenter) => {
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      startEditCostCenter(cc);
+    } else {
+      setPasswordModal({ isOpen: true, action: () => startEditCostCenter(cc), password: '', error: '' });
     }
   };
 
@@ -911,8 +963,7 @@ function MainApp() {
     }
   };
 
-  const handleSaveReportTemplate = async () => {
-    if (!newSavedReportName) return;
+  const saveReportTemplate = async () => {
     const reportData = {
       name: newSavedReportName,
       filterStart,
@@ -928,13 +979,45 @@ function MainApp() {
     }
   };
 
-  const handleAddSupplier = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveReportTemplate = () => {
+    if (!newSavedReportName) return;
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      saveReportTemplate();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => saveReportTemplate(), password: '', error: '' });
+    }
+  };
+
+  const addSupplier = async () => {
     try {
       await addDoc(collection(db, 'suppliers'), newSupplier);
       setNewSupplier({ name: '', contact: '', email: '', category: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'suppliers');
+    }
+  };
+
+  const handleAddSupplier = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSupplier.name) return;
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      addSupplier();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => addSupplier(), password: '', error: '' });
+    }
+  };
+
+  const startEditSupplier = (s: Supplier) => {
+    setEditingSupplierId(s.id);
+    setEditSupplierForm(s);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleStartEditSupplier = (s: Supplier) => {
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      startEditSupplier(s);
+    } else {
+      setPasswordModal({ isOpen: true, action: () => startEditSupplier(s), password: '', error: '' });
     }
   };
 
@@ -949,13 +1032,22 @@ function MainApp() {
     }
   };
 
-  const handleAddClient = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addClient = async () => {
     try {
       await addDoc(collection(db, 'clients'), newClient);
       setNewClient({ name: '', contact: '', email: '', project: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'clients');
+    }
+  };
+
+  const handleAddClient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClient.name) return;
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      addClient();
+    } else {
+      setPasswordModal({ isOpen: true, action: () => addClient(), password: '', error: '' });
     }
   };
 
@@ -973,6 +1065,20 @@ function MainApp() {
       alert('Usuário cadastrado com sucesso! Ele poderá acessar o sistema com o usuário e senha informados.');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'users');
+    }
+  };
+
+  const startEditClient = (c: Client) => {
+    setEditingClientId(c.id);
+    setEditClientForm(c);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleStartEditClient = (c: Client) => {
+    if (user?.role === 'admin' || user?.username === 'admin') {
+      startEditClient(c);
+    } else {
+      setPasswordModal({ isOpen: true, action: () => startEditClient(c), password: '', error: '' });
     }
   };
 
@@ -1648,7 +1754,7 @@ function MainApp() {
                                 <td className="p-4">
                                   <div className="flex items-center justify-center gap-1">
                                     <button 
-                                      onClick={() => { setEditingCostCenterId(cc.id); setEditCostCenterForm(cc); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                      onClick={() => handleStartEditCostCenter(cc)}
                                       className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
                                     >
                                       <Edit2 size={16} />
@@ -1842,7 +1948,7 @@ function MainApp() {
                               <td className="p-4">
                                 <div className="flex items-center justify-center gap-1">
                                   <button 
-                                    onClick={() => { setEditingSupplierId(s.id); setEditSupplierForm(s); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                    onClick={() => handleStartEditSupplier(s)}
                                     className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
                                   >
                                     <Edit2 size={16} />
@@ -1983,7 +2089,7 @@ function MainApp() {
                               <td className="p-4">
                                 <div className="flex items-center justify-center gap-1">
                                   <button 
-                                    onClick={() => { setEditingClientId(c.id); setEditClientForm(c); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                    onClick={() => handleStartEditClient(c)}
                                     className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
                                   >
                                     <Edit2 size={16} />
