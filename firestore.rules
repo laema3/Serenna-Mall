@@ -70,6 +70,18 @@ service cloud.firestore {
           (request.auth.token.email == "camillasites@gmail.com" && request.auth.token.email_verified == true));
     }
 
+    function isStandard() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'standard';
+    }
+
+    function isViewer() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'viewer';
+    }
+
     function hasRequiredFields(fields) {
       return request.resource.data.keys().hasAll(fields);
     }
@@ -127,7 +139,7 @@ service cloud.firestore {
       return hasRequiredFields(['username', 'role']) &&
              data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
              (!('password' in data) || (data.password is string && data.password.size() >= 4)) &&
-             data.role in ['admin', 'standard'];
+             data.role in ['admin', 'standard', 'viewer'];
     }
 
     // ===============================================================
@@ -136,49 +148,53 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAdmin() || isStandard();
     }
 
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidExpense(request.resource.data);
-      allow update: if isAuthenticated() && isValidExpense(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow create: if (isAdmin() || isStandard()) && isValidExpense(request.resource.data);
+      allow update: if (isAdmin() || isStandard()) && isValidExpense(request.resource.data);
+      allow delete: if isAdmin() || isStandard();
     }
 
     match /suppliers/{supplierId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidSupplier(request.resource.data);
-      allow update: if isAuthenticated() && isValidSupplier(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow create: if isAdmin() || isStandard();
+      allow update: if isAdmin() || isStandard();
+      allow delete: if isAdmin() || isStandard();
     }
 
     match /clients/{clientId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidClient(request.resource.data);
-      allow update: if isAuthenticated() && isValidClient(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow create: if isAdmin() || isStandard();
+      allow update: if isAdmin() || isStandard();
+      allow delete: if isAdmin() || isStandard();
     }
 
     match /cost_centers/{ccId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidCostCenter(request.resource.data);
-      allow update: if isAuthenticated() && isValidCostCenter(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow create: if isAdmin() || isStandard();
+      allow update: if isAdmin() || isStandard();
+      allow delete: if isAdmin() || isStandard();
     }
 
     match /saved_reports/{reportId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow create: if isAdmin() || isStandard();
+      allow update: if isAdmin() || isStandard();
+      allow delete: if isAdmin() || isStandard();
     }
 
     match /users/{userId} {
       // Allow read for login check
       allow read: if true;
-      // Allow user to create their own document if it doesn't exist, or if admin
-      allow create: if (isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data)) || isAdmin();
+      // Allow user to create their own document if it doesn't exist, but only with non-admin role
+      // unless the creator is an admin.
+      allow create: if (isAuthenticated() && request.auth.uid == userId && 
+                        isValidUser(request.resource.data) && 
+                        request.resource.data.role != 'admin') || isAdmin();
+      // Only admins can update user documents (including roles)
       allow update: if isAdmin() && isValidUser(request.resource.data);
       allow delete: if isAdmin();
     }

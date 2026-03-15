@@ -229,7 +229,7 @@ type SavedReport = {
 type AppUser = {
   id: string;
   username: string;
-  role: 'admin' | 'standard';
+  role: 'admin' | 'standard' | 'viewer';
 };
 
 export default function App() {
@@ -315,69 +315,112 @@ function MainApp() {
 
   // Firebase Auth Listener
   useEffect(() => {
+    let unsubUserDoc: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log("Auth state changed - firebaseUser:", firebaseUser?.email || "none");
-      if (firebaseUser) {
-        // Check if user exists in Firestore users collection
-        try {
-          let userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          
-          // Se o documento não existe no UID do Auth, mas o email é do nosso sistema de login manual
-          if (!userDoc.exists() && firebaseUser.email?.endsWith('@serenna.mall')) {
-            const docId = firebaseUser.email.split('@')[0];
-            const oldDoc = await getDoc(doc(db, 'users', docId));
-            
-            if (oldDoc.exists()) {
-              const userData = oldDoc.data();
-              // Migra o documento antigo para o novo UID do Auth
-              await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...userData,
-                id: firebaseUser.uid
-              });
-              try {
-                await deleteDoc(doc(db, 'users', docId));
-              } catch (e) {
-                console.warn('Could not delete old user doc, probably due to permissions. This is fine.', e);
-              }
-              userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            }
-          }
+      
+      if (unsubUserDoc) {
+        unsubUserDoc();
+        unsubUserDoc = null;
+      }
 
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
+      if (firebaseUser) {
+        // Listen to current user document in real-time
+        unsubUserDoc = onSnapshot(doc(db, 'users', firebaseUser.uid), async (snapshot) => {
+          if (snapshot.exists()) {
+            const userData = snapshot.data();
+            const username = userData.username || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+            let role = userData.role || 'standard';
+            
+            // FORÇA O PAPEL DE VISUALIZADOR PARA USUÁRIOS ESPECÍFICOS
+            const lowerUsername = username.toLowerCase();
+            const lowerEmail = firebaseUser.email?.toLowerCase() || '';
+            const userId = firebaseUser.uid;
+            
+            if (lowerUsername.includes('sérgio') || 
+                lowerUsername.includes('sergio') || 
+                lowerUsername.includes('semarg') ||
+                lowerUsername.includes('hwlnld') || // ID detectado no banner
+                userId === 'hwlnldnofweyg3zillhp' ||
+                lowerEmail.includes('semarg')) {
+              role = 'viewer';
+              console.log("ACESSO RESTRITO CRÍTICO ATIVADO PARA: " + username);
+            }
+            
+            console.log(`Usuário logado: ${username} | Papel: ${role}`);
+            
             setUser({
               id: firebaseUser.uid,
-              username: userData.username || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-              role: userData.role || 'standard'
+              username: username,
+              role: role as 'admin' | 'standard' | 'viewer'
             });
+            setIsAuthReady(true);
           } else {
+            // Se o documento não existe no UID do Auth, mas o email é do nosso sistema de login manual
+            if (firebaseUser.email?.endsWith('@serenna.mall')) {
+              const docId = firebaseUser.email.split('@')[0];
+              try {
+                const oldDoc = await getDoc(doc(db, 'users', docId));
+                if (oldDoc.exists()) {
+                  const userData = oldDoc.data();
+                  // Migra o documento antigo para o novo UID do Auth
+                  await setDoc(doc(db, 'users', firebaseUser.uid), {
+                    ...userData,
+                    id: firebaseUser.uid
+                  });
+                  try {
+                    await deleteDoc(doc(db, 'users', docId));
+                  } catch (e) {
+                    console.warn('Could not delete old user doc', e);
+                  }
+                  // O listener onSnapshot vai disparar novamente agora que o documento existe
+                  return;
+                }
+              } catch (err) {
+                console.error('Migration error:', err);
+              }
+            }
+
             // New user from Google or other provider
             const newUser: AppUser = {
               id: firebaseUser.uid,
               username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
               role: firebaseUser.email === 'camillasites@gmail.com' ? 'admin' : 'standard'
             };
-            await setDoc(doc(db, 'users', firebaseUser.uid), {
-              username: newUser.username,
-              role: newUser.role
-            });
-            setUser(newUser);
+            
+            // Special check for Sérgio/semarg even for Google login if not already in DB
+            const lowerUsername = newUser.username.toLowerCase();
+            if (lowerUsername === 'sérgio' || lowerUsername === 'sergio' || lowerUsername === 'semarg') {
+              newUser.role = 'viewer';
+            }
+
+            try {
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                username: newUser.username,
+                role: newUser.role
+              });
+              setUser(newUser);
+            } catch (err) {
+              console.error('Error creating new user doc:', err);
+              setUser(newUser); // Fallback
+            }
+            setIsAuthReady(true);
           }
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          // Fallback if firestore fails but auth works
-          setUser({
-            id: firebaseUser.uid,
-            username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-            role: firebaseUser.email === 'camillasites@gmail.com' ? 'admin' : 'standard'
-          });
-        }
+        }, (err) => {
+          console.error('User doc listener error:', err);
+          setIsAuthReady(true);
+        });
       } else {
         setUser(null);
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      if (unsubUserDoc) unsubUserDoc();
+    };
   }, []);
 
   // Firestore Data Listeners
@@ -423,8 +466,8 @@ function MainApp() {
       setSavedReports(reports);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'saved_reports'));
 
-    let unsubAllUsers: () => void;
-    if (user.role === 'admin') {
+    let unsubAllUsers: (() => void) | null = null;
+    if (user.role === 'admin' || user.role === 'viewer') {
       unsubAllUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
         const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AppUser));
         setAllUsers(users);
@@ -518,7 +561,13 @@ function MainApp() {
 
       // If no users exist in the database, make this one admin. Otherwise standard.
       const allUsersSnapshot = await getDocs(collection(db, 'users'));
-      const role = allUsersSnapshot.empty ? 'admin' : 'standard';
+      let role = allUsersSnapshot.empty ? 'admin' : 'standard';
+      
+      // Special check for Sérgio/semarg even for manual registration
+      const lowerUsername = loginForm.username.toLowerCase();
+      if (lowerUsername === 'sérgio' || lowerUsername === 'sergio' || lowerUsername === 'semarg') {
+        role = 'viewer';
+      }
       
       const dummyEmail = `${loginForm.username}@serenna.mall`;
       const { createUserWithEmailAndPassword } = await import('firebase/auth');
@@ -752,6 +801,11 @@ function MainApp() {
   }, [filteredExpenses, expenses, initialBalance, filterStart]);
 
   const handleSaveBalance = async () => {
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      setIsEditingBalance(false);
+      return;
+    }
     // Handle Brazilian format (replace comma with dot and remove thousands separator)
     const sanitizedBalance = tempBalance.replace(/\./g, '').replace(',', '.');
     const newBalance = parseFloat(sanitizedBalance);
@@ -773,6 +827,13 @@ function MainApp() {
   };
 
   const toggleStatus = async (expense: Expense) => {
+    const username = user?.username?.toLowerCase() || '';
+    const isRestricted = username.includes('semarg') || username.includes('sergio') || username.includes('sérgio') || username.includes('hwlnld');
+    
+    if (user?.role === 'viewer' || isRestricted) {
+      alert(`BLOQUEIO DE SEGURANÇA: Seu usuário (${user?.username}) está em modo de APENAS VISUALIZAÇÃO.`);
+      return;
+    }
     const newStatus = expense.status === 'paid' ? 'pending' : 'paid';
     try {
       await updateDoc(doc(db, 'expenses', expense.id), { status: newStatus });
@@ -795,6 +856,11 @@ function MainApp() {
   };
 
   const addExpense = async () => {
+    console.log("Tentativa de adicionar despesa. Papel do usuário:", user?.role);
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     const newExpenses = [];
     const count = newExpense.installments || 1;
     
@@ -865,7 +931,13 @@ function MainApp() {
   };
 
   const saveEdit = async () => {
-    if (!editingId) return;
+    const username = user?.username?.toLowerCase() || '';
+    const isRestricted = username.includes('semarg') || username.includes('sergio') || username.includes('sérgio') || username.includes('hwlnld');
+    
+    if (!editingId || user?.role === 'viewer' || isRestricted) {
+      alert(`BLOQUEIO DE SEGURANÇA: Seu usuário (${user?.username}) está em modo de APENAS VISUALIZAÇÃO.`);
+      return;
+    }
     const { id, ...dataToUpdate } = editForm as any;
     const cleanData = Object.fromEntries(
       Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
@@ -885,7 +957,11 @@ function MainApp() {
   };
 
   const executeDelete = async () => {
-    if (!deleteModal.id) return;
+    const isSemarg = user?.username?.toLowerCase() === 'semarg' || user?.username?.toLowerCase() === 'sérgio' || user?.username?.toLowerCase() === 'sergio';
+    if (!deleteModal.id || user?.role === 'viewer' || isSemarg) {
+      if (user?.role === 'viewer' || isSemarg) alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
 
     if (deleteModal.type === 'supplier') {
       const supplier = suppliers.find(s => s.id === deleteModal.id);
@@ -913,6 +989,10 @@ function MainApp() {
   };
 
   const addCostCenter = async () => {
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     try {
       await addDoc(collection(db, 'cost_centers'), newCostCenter);
       setNewCostCenter({ name: '', budget: 0 });
@@ -939,7 +1019,11 @@ function MainApp() {
   };
 
   const saveEditCostCenter = async () => {
-    if (!editingCostCenterId) return;
+    const isSemarg = user?.username?.toLowerCase() === 'semarg' || user?.username?.toLowerCase() === 'sérgio' || user?.username?.toLowerCase() === 'sergio';
+    if (!editingCostCenterId || user?.role === 'viewer' || isSemarg) {
+      if (user?.role === 'viewer' || isSemarg) alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     const { id, ...dataToUpdate } = editCostCenterForm as any;
     const cleanData = Object.fromEntries(
       Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
@@ -955,6 +1039,10 @@ function MainApp() {
   };
 
   const saveReportTemplate = async () => {
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     const reportData = {
       name: newSavedReportName,
       filterStart,
@@ -976,6 +1064,10 @@ function MainApp() {
   };
 
   const addSupplier = async () => {
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     try {
       await addDoc(collection(db, 'suppliers'), newSupplier);
       setNewSupplier({ name: '', contact: '', email: '', category: '' });
@@ -1002,7 +1094,11 @@ function MainApp() {
   };
 
   const saveEditSupplier = async () => {
-    if (!editingSupplierId) return;
+    const isSemarg = user?.username?.toLowerCase() === 'semarg' || user?.username?.toLowerCase() === 'sérgio' || user?.username?.toLowerCase() === 'sergio';
+    if (!editingSupplierId || user?.role === 'viewer' || isSemarg) {
+      if (user?.role === 'viewer' || isSemarg) alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     const { id, ...dataToUpdate } = editSupplierForm as any;
     const cleanData = Object.fromEntries(
       Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
@@ -1018,6 +1114,10 @@ function MainApp() {
   };
 
   const addClient = async () => {
+    if (user?.role === 'viewer') {
+      alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     try {
       await addDoc(collection(db, 'clients'), newClient);
       setNewClient({ name: '', contact: '', email: '', project: '' });
@@ -1034,18 +1134,36 @@ function MainApp() {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserForm.username || !newUserForm.password) return;
+    if (!newUserForm.username || !newUserForm.password || user?.role === 'viewer') return;
+    
+    // Enforce viewer role for Sérgio or semarg if requested
+    const roleToSave = newUserForm.username.toLowerCase() === 'sérgio' || 
+                       newUserForm.username.toLowerCase() === 'sergio' ||
+                       newUserForm.username.toLowerCase() === 'semarg'
+      ? 'viewer' 
+      : (newUserForm.role || 'standard');
+
     try {
       // We use a random ID for Firestore, but the username is unique
       await addDoc(collection(db, 'users'), {
         username: newUserForm.username,
         password: newUserForm.password,
-        role: newUserForm.role || 'standard'
+        role: roleToSave
       });
       setNewUserForm({ username: '', password: '', role: 'standard' });
-      alert('Usuário cadastrado com sucesso! Ele poderá acessar o sistema com o usuário e senha informados.');
+      alert(`Usuário ${newUserForm.username} cadastrado com sucesso!${roleToSave === 'viewer' ? ' (Definido como Apenas Visualização)' : ''}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'users');
+    }
+  };
+
+  const toggleUserRole = async (u: AppUser) => {
+    if (u.id === user?.id || user?.role === 'viewer') return;
+    const newRole = u.role === 'admin' ? 'standard' : u.role === 'standard' ? 'viewer' : 'admin';
+    try {
+      await updateDoc(doc(db, 'users', u.id), { role: newRole });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${u.id}`);
     }
   };
 
@@ -1061,7 +1179,11 @@ function MainApp() {
   };
 
   const saveEditClient = async () => {
-    if (!editingClientId) return;
+    const isSemarg = user?.username?.toLowerCase() === 'semarg' || user?.username?.toLowerCase() === 'sérgio' || user?.username?.toLowerCase() === 'sergio';
+    if (!editingClientId || user?.role === 'viewer' || isSemarg) {
+      if (user?.role === 'viewer' || isSemarg) alert('Apenas visualização. Operação não permitida.');
+      return;
+    }
     const { id, ...dataToUpdate } = editClientForm as any;
     const cleanData = Object.fromEntries(
       Object.entries(dataToUpdate).filter(([_, v]) => v !== undefined)
@@ -1269,7 +1391,7 @@ function MainApp() {
             <span className="font-semibold">Relatórios</span>
           </button>
 
-          {user?.role === 'admin' && (
+          { (user?.role === 'admin' || user?.role === 'viewer') && (
             <button 
               onClick={() => { setCurrentView('users'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'users' ? 'bg-white text-neutral-900 shadow-lg' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}
@@ -1287,7 +1409,7 @@ function MainApp() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold truncate">{user.username || 'Usuário'}</p>
-              <p className="text-[10px] text-neutral-500 truncate">{user.role === 'admin' ? 'Administrador' : 'Padrão'}</p>
+              <p className="text-[10px] text-neutral-500 truncate">{user.role === 'admin' ? 'Administrador' : user.role === 'viewer' ? 'Apenas Visualização' : 'Padrão'}</p>
             </div>
             <button 
               onClick={handleLogout}
@@ -1315,7 +1437,7 @@ function MainApp() {
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm font-bold text-neutral-900">{user.username}</p>
-              <p className="text-[10px] text-neutral-500 uppercase font-bold">{user.role === 'admin' ? 'Administrador' : 'Usuário'}</p>
+              <p className="text-[10px] text-neutral-500 uppercase font-bold">{user.role === 'admin' ? 'Administrador' : user.role === 'viewer' ? 'Apenas Visualização' : 'Usuário'}</p>
             </div>
             <button 
               onClick={handleLogout}
@@ -1457,7 +1579,8 @@ function MainApp() {
                 </button>
                 <button 
                   type="submit"
-                  className="px-6 py-2.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl font-bold shadow-lg shadow-blue-200 transition-all"
+                  disabled={user?.role === 'viewer'}
+                  className="px-6 py-2.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl font-bold shadow-lg shadow-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Salvar Fornecedor
                 </button>
@@ -1533,15 +1656,18 @@ function MainApp() {
                     <p className="text-4xl font-bold text-neutral-900 tracking-tight">
                       {formatCurrency(initialBalance)}
                     </p>
-                    <button 
-                      onClick={() => {
-                        setTempBalance(initialBalance.toString());
-                        setIsEditingBalance(true);
-                      }}
-                      className="text-sm text-blue-600 hover:text-blue-800 font-medium underline opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1"
-                    >
-                      <Edit2 size={14} /> Editar
-                    </button>
+                    {user?.role !== 'viewer' && (
+                      <button 
+                        onClick={() => {
+                          setTempBalance(initialBalance.toString());
+                          setIsEditingBalance(true);
+                        }}
+                        className="text-sm font-medium underline opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-blue-600 hover:text-blue-800"
+                        title="Editar"
+                      >
+                        <Edit2 size={14} /> Editar
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1589,7 +1715,7 @@ function MainApp() {
  
             {/* Cost Centers Management */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-1">
+              <div className={`lg:col-span-1 ${user?.role === 'viewer' ? 'hidden' : ''}`}>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
                   <h3 className="text-xl font-bold text-neutral-900 mb-6 flex items-center gap-2">
                     <PlusCircle className="text-blue-600" />
@@ -1629,7 +1755,8 @@ function MainApp() {
                       )}
                       <button 
                         type="submit"
-                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2"
+                        disabled={user?.role === 'viewer'}
+                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {editingCostCenterId ? <Check size={20} /> : <Plus size={20} />}
                         {editingCostCenterId ? 'Salvar' : 'Adicionar'}
@@ -1639,7 +1766,7 @@ function MainApp() {
                 </div>
               </div>
 
-              <div className="lg:col-span-2">
+              <div className={user?.role === 'viewer' ? 'lg:col-span-3' : 'lg:col-span-2'}>
                 <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
                   <div className="p-6 border-b border-neutral-100">
                     <h3 className="text-xl font-bold text-neutral-900">Centros de Custo</h3>
@@ -1650,13 +1777,13 @@ function MainApp() {
                         <tr className="bg-neutral-50 text-neutral-500 text-xs font-bold uppercase tracking-wider">
                           <th className="p-4">Nome</th>
                           <th className="p-4">Orçamento</th>
-                          <th className="p-4 text-center">Ações</th>
+                          {user?.role !== 'viewer' && <th className="p-4 text-center">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
                         {costCenters.length === 0 ? (
                           <tr>
-                            <td colSpan={3} className="p-8 text-center text-neutral-400 italic">Nenhum centro de custo cadastrado.</td>
+                            <td colSpan={user?.role === 'viewer' ? 2 : 3} className="p-8 text-center text-neutral-400 italic">Nenhum centro de custo cadastrado.</td>
                           </tr>
                         ) : (
                           costCenters.map(cc => (
@@ -1694,22 +1821,24 @@ function MainApp() {
                               <tr key={cc.id} className="hover:bg-neutral-50 transition-colors">
                                 <td className="p-4 font-bold text-neutral-900">{cc.name}</td>
                                 <td className="p-4 text-neutral-600">{formatCurrency(cc.budget || 0)}</td>
-                                <td className="p-4">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <button 
-                                      onClick={() => handleStartEditCostCenter(cc)}
-                                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
-                                    >
-                                      <Edit2 size={16} />
-                                    </button>
-                                    <button 
-                                      onClick={() => confirmDelete(cc.id, 'costCenter')}
-                                      className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  </div>
-                                </td>
+                                {user?.role !== 'viewer' && (
+                                  <td className="p-4">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button 
+                                        onClick={() => handleStartEditCostCenter(cc)}
+                                        className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                                      >
+                                        <Edit2 size={16} />
+                                      </button>
+                                      <button 
+                                        onClick={() => confirmDelete(cc.id, 'costCenter')}
+                                        className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                )}
                               </tr>
                             )
                           ))
@@ -1779,7 +1908,7 @@ function MainApp() {
           <div className="space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Coluna de Formulário */}
-              <div className="lg:col-span-1">
+              <div className={`lg:col-span-1 ${user?.role === 'viewer' ? 'hidden' : ''}`}>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 sticky top-8">
                   <h3 className="text-xl font-bold text-neutral-900 mb-6 flex items-center gap-2">
                     <PlusCircle className="text-blue-600" />
@@ -1841,7 +1970,8 @@ function MainApp() {
                       )}
                       <button 
                         type="submit"
-                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2"
+                        disabled={user?.role === 'viewer'}
+                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {editingSupplierId ? <Check size={20} /> : <Plus size={20} />}
                         {editingSupplierId ? 'Salvar Alterações' : 'Cadastrar Fornecedor'}
@@ -1852,7 +1982,7 @@ function MainApp() {
               </div>
 
               {/* Coluna de Lista */}
-              <div className="lg:col-span-2">
+              <div className={user?.role === 'viewer' ? 'lg:col-span-3' : 'lg:col-span-2'}>
                 <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
                   <div className="p-6 border-b border-neutral-100 flex justify-between items-center">
                     <h3 className="text-xl font-bold text-neutral-900">Lista de Fornecedores</h3>
@@ -1867,13 +1997,13 @@ function MainApp() {
                           <th className="p-4">Nome</th>
                           <th className="p-4">Categoria</th>
                           <th className="p-4">Contato</th>
-                          <th className="p-4 text-center">Ações</th>
+                          {user?.role !== 'viewer' && <th className="p-4 text-center">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
                         {suppliers.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="p-8 text-center text-neutral-400 italic">Nenhum fornecedor cadastrado.</td>
+                            <td colSpan={user?.role === 'viewer' ? 3 : 4} className="p-8 text-center text-neutral-400 italic">Nenhum fornecedor cadastrado.</td>
                           </tr>
                         ) : (
                           suppliers.map(s => (
@@ -1888,22 +2018,24 @@ function MainApp() {
                                 </span>
                               </td>
                               <td className="p-4 text-sm text-neutral-600">{s.contact || '-'}</td>
-                              <td className="p-4">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button 
-                                    onClick={() => handleStartEditSupplier(s)}
-                                    className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
-                                  >
-                                    <Edit2 size={16} />
-                                  </button>
-                                  <button 
-                                    onClick={() => confirmDelete(s.id, 'supplier')}
-                                    className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </td>
+                              {user?.role !== 'viewer' && (
+                                <td className="p-4">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button 
+                                      onClick={() => handleStartEditSupplier(s)}
+                                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                                    >
+                                      <Edit2 size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => confirmDelete(s.id, 'supplier')}
+                                      className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           ))
                         )}
@@ -1920,7 +2052,7 @@ function MainApp() {
           <div className="space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Coluna de Formulário */}
-              <div className="lg:col-span-1">
+              <div className={`lg:col-span-1 ${user?.role === 'viewer' ? 'hidden' : ''}`}>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 sticky top-8">
                   <h3 className="text-xl font-bold text-neutral-900 mb-6 flex items-center gap-2">
                     <PlusCircle className="text-emerald-600" />
@@ -1982,7 +2114,8 @@ function MainApp() {
                       )}
                       <button 
                         type="submit"
-                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2"
+                        disabled={user?.role === 'viewer'}
+                        className="flex-[2] bg-neutral-900 text-white font-bold py-3 rounded-xl hover:bg-neutral-800 transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {editingClientId ? <Check size={20} /> : <Plus size={20} />}
                         {editingClientId ? 'Salvar Alterações' : 'Cadastrar Cliente'}
@@ -1993,7 +2126,7 @@ function MainApp() {
               </div>
 
               {/* Coluna de Lista */}
-              <div className="lg:col-span-2">
+              <div className={user?.role === 'viewer' ? 'lg:col-span-3' : 'lg:col-span-2'}>
                 <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
                   <div className="p-6 border-b border-neutral-100 flex justify-between items-center">
                     <h3 className="text-xl font-bold text-neutral-900">Lista de Clientes</h3>
@@ -2008,13 +2141,13 @@ function MainApp() {
                           <th className="p-4">Nome</th>
                           <th className="p-4">Projeto</th>
                           <th className="p-4">Contato</th>
-                          <th className="p-4 text-center">Ações</th>
+                          {user?.role !== 'viewer' && <th className="p-4 text-center">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
                         {clients.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="p-8 text-center text-neutral-400 italic">Nenhum cliente cadastrado.</td>
+                            <td colSpan={user?.role === 'viewer' ? 3 : 4} className="p-8 text-center text-neutral-400 italic">Nenhum cliente cadastrado.</td>
                           </tr>
                         ) : (
                           clients.map(c => (
@@ -2029,22 +2162,24 @@ function MainApp() {
                                 </span>
                               </td>
                               <td className="p-4 text-sm text-neutral-600">{c.contact || '-'}</td>
-                              <td className="p-4">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button 
-                                    onClick={() => handleStartEditClient(c)}
-                                    className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
-                                  >
-                                    <Edit2 size={16} />
-                                  </button>
-                                  <button 
-                                    onClick={() => confirmDelete(c.id, 'client')}
-                                    className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </td>
+                              {user?.role !== 'viewer' && (
+                                <td className="p-4">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button 
+                                      onClick={() => handleStartEditClient(c)}
+                                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                                    >
+                                      <Edit2 size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => confirmDelete(c.id, 'client')}
+                                      className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           ))
                         )}
@@ -2060,7 +2195,7 @@ function MainApp() {
         {currentView === 'expenses' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Coluna Esquerda: Formulário */}
-            <div className="lg:col-span-1 space-y-6">
+            <div className={`lg:col-span-1 space-y-6 ${user?.role === 'viewer' ? 'hidden' : ''}`}>
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 sticky top-8">
                 <h3 className="text-xl font-bold text-neutral-900 mb-6 flex items-center gap-2">
                   <PlusCircle className="text-blue-600" />
@@ -2188,7 +2323,8 @@ function MainApp() {
                     )}
                     <button 
                       type="submit"
-                      className="flex-[2] bg-neutral-900 text-white font-bold py-3.5 rounded-xl hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 shadow-md"
+                      disabled={user?.role === 'viewer'}
+                      className="flex-[2] bg-neutral-900 text-white font-bold py-3.5 rounded-xl hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {editingId ? <Check size={20} /> : <Plus size={20} />}
                       {editingId ? 'Salvar Alterações' : 'Lançar Despesa'}
@@ -2199,7 +2335,7 @@ function MainApp() {
             </div>
 
             {/* Tabela */}
-            <div className="lg:col-span-2">
+            <div className={user?.role === 'viewer' ? 'lg:col-span-3' : 'lg:col-span-2'}>
               <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
                 <div className="p-6 border-b border-neutral-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                   <h3 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
@@ -2292,8 +2428,9 @@ function MainApp() {
                             </td>
                             <td className="p-4 text-center">
                               <button 
-                                onClick={() => handleToggleStatus(expense)}
-                                className={`px-3 py-1 rounded-full text-xs font-bold ${expense.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
+                                onClick={() => user?.role !== 'viewer' && handleToggleStatus(expense)}
+                                disabled={user?.role === 'viewer'}
+                                className={`px-3 py-1 rounded-full text-xs font-bold ${expense.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} ${user?.role === 'viewer' ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                               >
                                 {expense.status === 'paid' ? 'Pago' : 'Pendente'}
                               </button>
@@ -2302,13 +2439,17 @@ function MainApp() {
                               <div className="flex items-center justify-center gap-1">
                                 <button 
                                   onClick={() => handleStartEdit(expense)}
-                                  className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                                  disabled={user?.role === 'viewer'}
+                                  className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:grayscale"
+                                  title={user?.role === 'viewer' ? "Apenas visualização" : "Editar"}
                                 >
                                   <Edit2 size={16} />
                                 </button>
                                 <button 
                                   onClick={() => handleConfirmDelete(expense.id)}
-                                  className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                                  disabled={user?.role === 'viewer'}
+                                  className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:grayscale"
+                                  title={user?.role === 'viewer' ? "Apenas visualização" : "Excluir"}
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -2369,23 +2510,25 @@ function MainApp() {
                   <Bookmark className="text-blue-600" />
                   Modelos de Relatórios Salvos
                 </h3>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Nome do modelo..."
-                    value={newSavedReportName}
-                    onChange={e => setNewSavedReportName(e.target.value)}
-                    className="px-3 py-2 bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                  <button 
-                    onClick={handleSaveReportTemplate}
-                    disabled={!newSavedReportName}
-                    className="bg-neutral-900 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-neutral-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    <Save size={16} />
-                    Salvar Filtro Atual
-                  </button>
-                </div>
+                {user?.role !== 'viewer' && (
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Nome do modelo..."
+                      value={newSavedReportName}
+                      onChange={e => setNewSavedReportName(e.target.value)}
+                      className="px-3 py-2 bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                    />
+                    <button 
+                      onClick={handleSaveReportTemplate}
+                      disabled={!newSavedReportName}
+                      className="bg-neutral-900 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-neutral-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      <Save size={16} />
+                      Salvar Filtro Atual
+                    </button>
+                  </div>
+                )}
               </div>
  
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2398,12 +2541,14 @@ function MainApp() {
                     <div key={report.id} className="group bg-neutral-50 p-4 rounded-xl border border-neutral-200 hover:border-blue-300 hover:shadow-md transition-all relative">
                       <div className="flex justify-between items-start mb-2">
                         <h4 className="font-bold text-neutral-900">{report.name}</h4>
-                        <button 
-                          onClick={() => confirmDelete(report.id, 'savedReport')}
-                          className="text-neutral-400 hover:text-red-600 p-1 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {user?.role !== 'viewer' && (
+                          <button 
+                            onClick={() => confirmDelete(report.id, 'savedReport')}
+                            className="text-neutral-400 hover:text-red-600 p-1 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                       <div className="space-y-1 text-xs text-neutral-500">
                         <p>Período: {report.filterStart || 'Início'} - {report.filterEnd || 'Fim'}</p>
@@ -2459,10 +2604,10 @@ function MainApp() {
           </div>
         )}
 
-        {currentView === 'users' && user?.role === 'admin' && (
+        {currentView === 'users' && (user?.role === 'admin' || user?.role === 'viewer') && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-1">
+              <div className={`lg:col-span-1 ${user?.role === 'viewer' ? 'hidden' : ''}`}>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 sticky top-8">
                   <h3 className="text-xl font-bold text-neutral-900 mb-6 flex items-center gap-2">
                     <PlusCircle className="text-neutral-900" />
@@ -2498,7 +2643,8 @@ function MainApp() {
                         onChange={e => setNewUserForm({...newUserForm, role: e.target.value as any})}
                         className="w-full px-3 py-2 bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-neutral-900 outline-none"
                       >
-                        <option value="standard">Padrão (Apenas Visualização/Lançamento)</option>
+                        <option value="standard">Padrão (Lançamento/Visualização)</option>
+                        <option value="viewer">Apenas Visualização</option>
                         <option value="admin">Administrador (Controle Total)</option>
                       </select>
                     </div>
@@ -2513,7 +2659,7 @@ function MainApp() {
                 </div>
               </div>
 
-              <div className="lg:col-span-2">
+              <div className={user?.role === 'viewer' ? 'lg:col-span-3' : 'lg:col-span-2'}>
                 <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
                   <div className="p-6 border-b border-neutral-100">
                     <h3 className="text-xl font-bold text-neutral-900">Usuários do Sistema</h3>
@@ -2532,17 +2678,22 @@ function MainApp() {
                           <tr key={u.id} className="hover:bg-neutral-50 transition-colors">
                             <td className="p-4 font-bold text-neutral-900">{u.username}</td>
                             <td className="p-4">
-                              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-neutral-100 text-neutral-600'}`}>
-                                {u.role === 'admin' ? 'Administrador' : 'Padrão'}
-                              </span>
+                              <button 
+                                onClick={() => toggleUserRole(u)}
+                                disabled={u.id === user?.id || user?.role === 'viewer'}
+                                className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors ${u.role === 'admin' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' : u.role === 'viewer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'} ${(u.id === user?.id || user?.role === 'viewer') ? 'cursor-not-allowed opacity-70' : ''}`}
+                                title={u.id === user?.id ? "Você não pode alterar seu próprio nível" : user?.role === 'viewer' ? "Apenas visualização" : "Clique para alterar o nível de acesso"}
+                              >
+                                {u.role === 'admin' ? 'Administrador' : u.role === 'viewer' ? 'Apenas Visualização' : 'Padrão'}
+                              </button>
                             </td>
                             <td className="p-4">
                               <div className="flex items-center justify-center gap-1">
                                 <button 
                                   onClick={() => confirmDelete(u.id, 'user' as any)}
-                                  className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                  disabled={u.id === user?.id}
-                                  title={u.id === user?.id ? "Você não pode excluir seu próprio usuário" : "Excluir usuário"}
+                                  className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                  disabled={u.id === user?.id || user?.role === 'viewer'}
+                                  title={u.id === user?.id ? "Você não pode excluir seu próprio usuário" : user?.role === 'viewer' ? "Apenas visualização" : "Excluir usuário"}
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -2558,7 +2709,6 @@ function MainApp() {
             </div>
           </div>
         )}
-
       </div>
     </main>
   </div>
