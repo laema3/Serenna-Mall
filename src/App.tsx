@@ -192,7 +192,6 @@ type Expense = {
   supplier: string;
   amount: number;
   installment?: string; // e.g., "1/3"
-  status: 'pending' | 'paid';
 };
 
 type Supplier = {
@@ -223,7 +222,6 @@ type SavedReport = {
   filterStart: string;
   filterEnd: string;
   filterSupplier: string;
-  filterStatus: 'all' | 'pending' | 'paid';
 };
 
 type AppUser = {
@@ -607,24 +605,17 @@ function MainApp() {
       'Parcela': exp.installment || 'Única',
       'Nota/Fatura': exp.invoiceNumber,
       'Vencimento': formatDate(exp.dueDate),
-      'Valor (R$)': exp.amount,
-      'Status': exp.status === 'paid' ? 'Pago' : 'Pendente'
+      'Valor (R$)': exp.amount
     }));
 
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     
-    // Add summary info
-    const totalPaid = filteredExpenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0);
-    const totalPending = filteredExpenses.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
-
     XLSX.utils.sheet_add_aoa(ws, [
       ["Resumo do Relatório:"],
-      ["Total Pago:", totalPaid],
-      ["Total Pendente:", totalPending],
       ["Total Geral:", filteredTotalExpenses],
       [],
       ["Filtros Aplicados:"],
-      [filterStart ? `Início: ${formatDate(filterStart)}` : "", filterEnd ? `Fim: ${formatDate(filterEnd)}` : "", filterSupplier ? `Fornecedor: ${filterSupplier}` : "", filterStatus !== 'all' ? `Status: ${filterStatus === 'paid' ? 'Pago' : 'Pendente'}` : ""]
+      [filterStart ? `Início: ${formatDate(filterStart)}` : "", filterEnd ? `Fim: ${formatDate(filterEnd)}` : "", filterSupplier ? `Fornecedor: ${filterSupplier}` : ""]
     ], { origin: "I1" });
 
     const wb = XLSX.utils.book_new();
@@ -641,22 +632,16 @@ function MainApp() {
     doc.text(`Total de Gastos (Geral): ${formatCurrency(totalExpenses)}`, 14, 34);
     doc.text(`Saldo Atual: ${formatCurrency(currentBalance)}`, 14, 40);
 
-    const totalPaid = filteredExpenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0);
-    const totalPending = filteredExpenses.filter(e => e.status === 'pending').reduce((s, e) => s + e.amount, 0);
-
     doc.setFontSize(9);
     doc.text(`Resumo do Período:`, 140, 22);
-    doc.text(`Total Pago: ${formatCurrency(totalPaid)}`, 140, 28);
-    doc.text(`Total Pendente: ${formatCurrency(totalPending)}`, 140, 34);
-    doc.text(`Total Filtrado: ${formatCurrency(filteredTotalExpenses)}`, 140, 40);
+    doc.text(`Total Filtrado: ${formatCurrency(filteredTotalExpenses)}`, 140, 28);
 
     let startY = 48;
-    if (filterStart || filterEnd || filterSupplier || filterStatus !== 'all') {
+    if (filterStart || filterEnd || filterSupplier) {
       let filterText = "Filtros: ";
       if (filterStart) filterText += `De ${formatDate(filterStart)} `;
       if (filterEnd) filterText += `Até ${formatDate(filterEnd)} `;
       if (filterSupplier) filterText += `Fornecedor: ${filterSupplier} `;
-      if (filterStatus !== 'all') filterText += `Status: ${filterStatus === 'paid' ? 'Pago' : 'Pendente'}`;
       
       doc.setFontSize(9);
       doc.setTextColor(100);
@@ -670,29 +655,16 @@ function MainApp() {
       exp.supplier + (exp.installment ? ` (P. ${exp.installment})` : ''),
       exp.invoiceNumber,
       formatDate(exp.dueDate),
-      exp.status === 'paid' ? 'PAGO' : 'PENDENTE',
       formatCurrency(exp.amount)
     ]);
 
     autoTable(doc, {
       startY: startY,
-      head: [['Data', 'Fornecedor', 'Nota/Fatura', 'Vencimento', 'Status', 'Valor']],
+      head: [['Data', 'Fornecedor', 'Nota/Fatura', 'Vencimento', 'Valor']],
       body: tableData,
       theme: 'striped',
       headStyles: { fillColor: [20, 20, 20] },
-      columnStyles: {
-        4: { fontStyle: 'bold' }
-      },
-      didParseCell: (data) => {
-        if (data.column.index === 4 && data.cell.section === 'body') {
-          if (data.cell.text[0] === 'PAGO') {
-            data.cell.styles.textColor = [0, 128, 0];
-          } else {
-            data.cell.styles.textColor = [128, 0, 0];
-          }
-        }
-      },
-      foot: [['', '', '', '', 'TOTAL NO PERÍODO', formatCurrency(filteredTotalExpenses)]],
+      foot: [['', '', '', 'TOTAL NO PERÍODO', formatCurrency(filteredTotalExpenses)]],
       footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
     });
 
@@ -703,7 +675,6 @@ function MainApp() {
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid'>('all');
 
   // Edit State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -748,14 +719,13 @@ function MainApp() {
       if (filterStart && exp.date < filterStart) return false;
       if (filterEnd && exp.date > filterEnd) return false;
       if (filterSupplier && !exp.supplier.toLowerCase().includes(filterSupplier.toLowerCase())) return false;
-      if (filterStatus !== 'all' && exp.status !== filterStatus) return false;
       return true;
     }).sort((a, b) => {
       const dateA = new Date(a.dueDate || a.date).getTime();
       const dateB = new Date(b.dueDate || b.date).getTime();
       return dateA - dateB;
     });
-  }, [expenses, filterStart, filterEnd, filterSupplier, filterStatus]);
+  }, [expenses, filterStart, filterEnd, filterSupplier]);
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
   const currentBalance = (Number(initialBalance) || 0) - totalExpenses;
@@ -826,27 +796,6 @@ function MainApp() {
     }
   };
 
-  const toggleStatus = async (expense: Expense) => {
-    const username = user?.username?.toLowerCase() || '';
-    const isRestricted = username.includes('semarg') || username.includes('sergio') || username.includes('sérgio') || username.includes('hwlnld');
-    
-    if (user?.role === 'viewer' || isRestricted) {
-      alert(`BLOQUEIO DE SEGURANÇA: Seu usuário (${user?.username}) está em modo de APENAS VISUALIZAÇÃO.`);
-      return;
-    }
-    const newStatus = expense.status === 'paid' ? 'pending' : 'paid';
-    try {
-      await updateDoc(doc(db, 'expenses', expense.id), { status: newStatus });
-      alert('Status atualizado com sucesso!');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `expenses/${expense.id}`);
-    }
-  };
-
-  const handleToggleStatus = (expense: Expense) => {
-    toggleStatus(expense);
-  };
-
   const handleStartEdit = (expense: Expense) => {
     startEdit(expense);
   };
@@ -880,8 +829,7 @@ function MainApp() {
         dueDate: expDueDate || '',
         invoiceNumber: count > 1 ? `${newExpense.invoiceNumber} (${i + 1}/${count})` : (newExpense.invoiceNumber || ''),
         supplier: newExpense.supplier || '',
-        amount: newExpense.amount || 0,
-        status: 'pending'
+        amount: newExpense.amount || 0
       };
 
       if (count > 1) {
@@ -1047,8 +995,7 @@ function MainApp() {
       name: newSavedReportName,
       filterStart,
       filterEnd,
-      filterSupplier,
-      filterStatus
+      filterSupplier
     };
     try {
       await addDoc(collection(db, 'saved_reports'), reportData);
@@ -2362,19 +2309,6 @@ function MainApp() {
 
                     <div className="flex items-center gap-2 bg-neutral-50 p-2 rounded-lg border border-neutral-200 w-full sm:w-auto">
                       <Filter size={16} className="text-neutral-400" />
-                      <select 
-                        value={filterStatus}
-                        onChange={e => setFilterStatus(e.target.value as any)}
-                        className="bg-transparent border-none text-sm focus:ring-0 p-0 text-neutral-600 w-full sm:w-auto outline-none appearance-none cursor-pointer"
-                      >
-                        <option value="all">Todos os Status</option>
-                        <option value="pending">Pendentes</option>
-                        <option value="paid">Pagos</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-neutral-50 p-2 rounded-lg border border-neutral-200 w-full sm:w-auto">
-                      <Filter size={16} className="text-neutral-400" />
                       <input 
                         type="date" 
                         value={filterStart}
@@ -2400,14 +2334,13 @@ function MainApp() {
                         <th className="p-4 font-semibold border-b border-neutral-200">Vencimento</th>
                         <th className="p-4 font-semibold border-b border-neutral-200">Fornecedor</th>
                         <th className="p-4 font-semibold border-b border-neutral-200 text-right">Valor</th>
-                        <th className="p-4 font-semibold border-b border-neutral-200 text-center">Status</th>
                         <th className="p-4 font-semibold border-b border-neutral-200 text-center">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
                       {filteredExpenses.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-neutral-500">
+                          <td colSpan={5} className="p-8 text-center text-neutral-500">
                             Nenhum lançamento encontrado.
                           </td>
                         </tr>
@@ -2425,15 +2358,6 @@ function MainApp() {
                             </td>
                             <td className="p-4 text-right font-bold text-red-600 whitespace-nowrap">
                               - {formatCurrency(expense.amount)}
-                            </td>
-                            <td className="p-4 text-center">
-                              <button 
-                                onClick={() => user?.role !== 'viewer' && handleToggleStatus(expense)}
-                                disabled={user?.role === 'viewer'}
-                                className={`px-3 py-1 rounded-full text-xs font-bold ${expense.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} ${user?.role === 'viewer' ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:scale-105 transition-transform'}`}
-                              >
-                                {expense.status === 'paid' ? 'Pago' : 'Pendente'}
-                              </button>
                             </td>
                             <td className="p-4 text-center">
                               <div className="flex items-center justify-center gap-1">
@@ -2559,7 +2483,6 @@ function MainApp() {
                           setFilterStart(report.filterStart);
                           setFilterEnd(report.filterEnd);
                           setFilterSupplier(report.filterSupplier);
-                          setFilterStatus(report.filterStatus || 'all');
                         }}
                         className="mt-4 w-full bg-white border border-neutral-300 text-neutral-700 py-2 rounded-lg text-xs font-bold hover:bg-neutral-50 transition-all flex items-center justify-center gap-2"
                       >
@@ -2582,18 +2505,6 @@ function MainApp() {
                 <div className="flex flex-col">
                   <span className="text-xs text-neutral-500 font-bold uppercase">Data Final</span>
                   <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)} className="border-b border-neutral-300 py-1 outline-none focus:border-blue-500" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs text-neutral-500 font-bold uppercase">Status</span>
-                  <select 
-                    value={filterStatus} 
-                    onChange={e => setFilterStatus(e.target.value as any)} 
-                    className="border-b border-neutral-300 py-1 outline-none focus:border-blue-500 bg-transparent"
-                  >
-                    <option value="all">Todos</option>
-                    <option value="pending">Pendentes</option>
-                    <option value="paid">Pagos</option>
-                  </select>
                 </div>
                 <div className="flex flex-col flex-1">
                   <span className="text-xs text-neutral-500 font-bold uppercase">Fornecedor</span>
