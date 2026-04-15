@@ -19,7 +19,6 @@ service cloud.firestore {
     //   - supplier: string (required)
     //   - amount: number (required, positive)
     //   - installment: string (optional)
-    //   - status: string (required, 'pending' | 'paid')
     //
     // Collection: suppliers
     // Fields:
@@ -46,7 +45,6 @@ service cloud.firestore {
     //   - filterStart: string (optional)
     //   - filterEnd: string (optional)
     //   - filterSupplier: string (optional)
-    //   - filterStatus: string (optional)
     //
     // Collection: users
     // Fields:
@@ -103,11 +101,10 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidExpense(data) {
-      return hasRequiredFields(['date', 'supplier', 'amount', 'status']) &&
+      return hasRequiredFields(['date', 'supplier', 'amount']) &&
              isValidDate(data.date) &&
              data.supplier is string && data.supplier.size() > 0 && data.supplier.size() < 200 &&
              data.amount is number && data.amount >= 0 &&
-             data.status in ['pending', 'paid'] &&
              (!('dueDate' in data) || isValidDate(data.dueDate)) &&
              (!('invoiceNumber' in data) || (data.invoiceNumber is string && data.invoiceNumber.size() < 100)) &&
              (!('installment' in data) || (data.installment is string && data.installment.size() < 50));
