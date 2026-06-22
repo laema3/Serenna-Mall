@@ -601,10 +601,10 @@ function MainApp() {
   const exportToExcel = () => {
     const dataToExport = filteredExpenses.map(exp => ({
       'Data': formatDate(exp.date),
+      'Vencimento': formatDate(exp.dueDate),
+      'NF': exp.invoiceNumber || '-',
       'Fornecedor': exp.supplier,
       'Parcela': exp.installment || 'Única',
-      'Nota/Fatura': exp.invoiceNumber,
-      'Vencimento': formatDate(exp.dueDate),
       'Valor (R$)': exp.amount
     }));
 
@@ -652,15 +652,15 @@ function MainApp() {
 
     const tableData = filteredExpenses.map(exp => [
       formatDate(exp.date),
-      exp.supplier + (exp.installment ? ` (P. ${exp.installment})` : ''),
-      exp.invoiceNumber,
       formatDate(exp.dueDate),
+      exp.invoiceNumber || '-',
+      exp.supplier + (exp.installment ? ` (P. ${exp.installment})` : ''),
       formatCurrency(exp.amount)
     ]);
 
     autoTable(doc, {
       startY: startY,
-      head: [['Data', 'Fornecedor', 'Nota/Fatura', 'Vencimento', 'Valor']],
+      head: [['Data', 'Vencimento', 'NF', 'Fornecedor', 'Valor']],
       body: tableData,
       theme: 'striped',
       headStyles: { fillColor: [20, 20, 20] },
@@ -2332,6 +2332,7 @@ function MainApp() {
                       <tr className="bg-neutral-50 text-neutral-500 text-sm uppercase tracking-wider">
                         <th className="p-4 font-semibold border-b border-neutral-200">Data</th>
                         <th className="p-4 font-semibold border-b border-neutral-200">Vencimento</th>
+                        <th className="p-4 font-semibold border-b border-neutral-200">NF</th>
                         <th className="p-4 font-semibold border-b border-neutral-200">Fornecedor</th>
                         <th className="p-4 font-semibold border-b border-neutral-200 text-right">Valor</th>
                         <th className="p-4 font-semibold border-b border-neutral-200 text-center">Ações</th>
@@ -2340,7 +2341,7 @@ function MainApp() {
                     <tbody className="divide-y divide-neutral-100">
                       {filteredExpenses.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-neutral-500">
+                          <td colSpan={6} className="p-8 text-center text-neutral-500">
                             Nenhum lançamento encontrado.
                           </td>
                         </tr>
@@ -2352,6 +2353,9 @@ function MainApp() {
                             </td>
                             <td className="p-4 text-neutral-600 text-sm whitespace-nowrap">
                               {expense.dueDate ? formatDate(expense.dueDate) : '-'}
+                            </td>
+                            <td className="p-4 text-neutral-600 text-sm whitespace-nowrap">
+                              {expense.invoiceNumber || '-'}
                             </td>
                             <td className="p-4 text-neutral-900 font-semibold">
                               {expense.supplier}
