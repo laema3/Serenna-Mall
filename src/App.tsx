@@ -28,7 +28,9 @@ import {
   BarChart3,
   Bookmark,
   Save,
-  Play
+  Play,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -676,6 +678,14 @@ function MainApp() {
   const [filterEnd, setFilterEnd] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStart, filterEnd, filterSupplier]);
+
   // Edit State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Expense>>({});
@@ -731,6 +741,13 @@ function MainApp() {
   const currentBalance = (Number(initialBalance) || 0) - totalExpenses;
 
   const filteredTotalExpenses = filteredExpenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+
+  const paginatedExpenses = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredExpenses.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredExpenses, currentPage, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredExpenses.length / itemsPerPage);
 
   // Prepare chart data based on filtered expenses
   const chartData = useMemo(() => {
@@ -2346,7 +2363,7 @@ function MainApp() {
                           </td>
                         </tr>
                       ) : (
-                        filteredExpenses.map((expense) => (
+                        paginatedExpenses.map((expense) => (
                           <tr key={expense.id} className={`hover:bg-neutral-50 transition-colors group ${editingId === expense.id ? 'bg-blue-50/50' : ''}`}>
                             <td className="p-4 text-neutral-900 font-medium whitespace-nowrap">
                               {formatDate(expense.date)}
@@ -2389,6 +2406,56 @@ function MainApp() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Paginação */}
+                {totalPages > 1 && (
+                  <div className="p-4 bg-neutral-50 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <span className="text-sm text-neutral-500">
+                      Mostrando <span className="font-semibold">{Math.min(filteredExpenses.length, (currentPage - 1) * itemsPerPage + 1)}</span> a <span className="font-semibold">{Math.min(filteredExpenses.length, currentPage * itemsPerPage)}</span> de <span className="font-semibold">{filteredExpenses.length}</span> lançamentos
+                    </span>
+                    
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="p-2 border border-neutral-200 rounded-lg bg-white text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Página Anterior"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                        if (totalPages <= 5 || page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1) {
+                          return (
+                            <button
+                              key={page}
+                              onClick={() => setCurrentPage(page)}
+                              className={`px-3 py-1.5 text-sm font-semibold rounded-lg border transition-colors ${
+                                currentPage === page
+                                  ? 'bg-neutral-900 text-white border-neutral-900'
+                                  : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          );
+                        } else if (page === 2 || page === totalPages - 1) {
+                          return <span key={page} className="px-1 text-neutral-400">...</span>;
+                        }
+                        return null;
+                      })}
+
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        className="p-2 border border-neutral-200 rounded-lg bg-white text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Próxima Página"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
